@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # --- CONFIGURACIÓN ---
 TWIC_START_DATE = datetime(1994, 9, 17)
 TWIC_START_NUMBER = 1
-HEADERS = {'User-Agent': 'Mozilla/5.0...'}
+HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
 
 def get_latest_real_twic():
     est_latest = (datetime.now() - TWIC_START_DATE).days // 7 + TWIC_START_NUMBER
@@ -52,6 +52,10 @@ def process_downloads(start, end, limit):
             progress_bar.progress((i + 1) / total)
         except: continue
     
+    # Limpiar indicadores de progreso al terminar
+    progress_bar.empty()
+    status_text.empty()
+    
     if all_pgn_content:
         return "\n\n".join(all_pgn_content), f"{start}_{real_end}.pgn"
     return None, None
@@ -59,8 +63,9 @@ def process_downloads(start, end, limit):
 # --- INTERFAZ STREAMLIT ---
 st.title("♟️ TWIC Downloader")
 
+# Calculamos el último número en segundo plano para que el código funcione,
+# pero ya no mostramos el mensaje st.info()
 latest = get_latest_real_twic()
-st.info(f"Última edición disponible: {latest}")
 
 opcion = st.selectbox("¿Qué deseas descargar?", ["Año completo", "Mes específico", "Última edición"])
 
@@ -68,15 +73,15 @@ archivo_final = None
 nombre_archivo = ""
 
 if opcion == "Año completo":
-    year = st.number_input("Año", min_value=1994, max_value=datetime.now().year, value=2023)
+    year = st.number_input("Año", min_value=1994, max_value=datetime.now().year, value=datetime.now().year)
     if st.button("Preparar descarga"):
         s, e = get_twic_range(year)
         archivo_final, nombre_archivo = process_downloads(s, e, latest)
 
 elif opcion == "Mes específico":
     col1, col2 = st.columns(2)
-    year = col1.number_input("Año", min_value=1994, max_value=datetime.now().year, value=2023)
-    month = col2.number_input("Mes (1-12)", min_value=1, max_value=12, value=1)
+    year = col1.number_input("Año", min_value=1994, max_value=datetime.now().year, value=datetime.now().year)
+    month = col2.number_input("Mes (1-12)", min_value=1, max_value=12, value=datetime.now().month)
     if st.button("Preparar descarga"):
         s, e = get_twic_range(year, month)
         archivo_final, nombre_archivo = process_downloads(s, e, latest)
