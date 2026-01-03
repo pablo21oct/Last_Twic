@@ -1,130 +1,95 @@
-import streamlit as st
-import re
 import requests
-from collections import defaultdict
+import zipfile
+import os
 import io
+import streamlit as st
+from datetime import datetime, timedelta
 
-# --- CONFIGURACIÓN Y LOGICA INTERNA (Tu código original adaptado) ---
-FILE_ID = '1Trc-xwyr8y-FcPzzyrP92lWzLsMt9MlQ'
+# --- CONFIGURACIÓN ---
+TWIC_START_DATE = datetime(1994, 9, 17)
+TWIC_START_NUMBER = 1
+HEADERS = {'User-Agent': 'Mozilla/5.0...'}
 
-def get_pgn_stream():
-    url = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
-    try:
-        response = requests.get(url, stream=True, timeout=30)
-        if response.status_code == 200:
-            return response
-    except:
-        return None
-    return None
+def get_latest_real_twic():
+    est_latest = (datetime.now() - TWIC_START_DATE).days // 7 + TWIC_START_NUMBER
+    for num in range(est_latest + 1, est_latest - 15, -1):
+        try:
+            r = requests.head(f"https://theweekinchess.com/zips/twic{num}g.zip", headers=HEADERS, timeout=5)
+            if r.status_code == 200: return num
+        except: continue
+    return 1625
 
-def buscar_jugadores_web(termino):
-    response = get_pgn_stream()
-    if not response: return {}
+def get_twic_range(year, month=None):
+    start_date = datetime(year, month if month else 1, 1)
+    if month:
+        if month == 12: end_date = datetime(year, 12, 31)
+        else: end_date = datetime(year, month + 1, 1) - timedelta(days=1)
+    else: end_date = datetime(year, 12, 31)
     
-    jugadores = defaultdict(int)
-    # Leemos línea a línea para no colapsar la memoria del servidor
-    for line in response.iter_lines():
-        linea = line.decode('utf-8', errors='ignore')
-        if linea.startswith('[White "') or linea.startswith('[Black "'):
-            match = re.match(r'\[(White|Black) "([^"]+)"\]', linea)
-            if match:
-                nombre = match.group(2)
-                if termino.lower() in nombre.lower():
-                    jugadores[nombre] += 1
-    return dict(sorted(jugadores.items(), key=lambda x: x[1], reverse=True))
+    s = (start_date - TWIC_START_DATE).days // 7 + TWIC_START_NUMBER
+    e = (end_date - TWIC_START_DATE).days // 7 + TWIC_START_NUMBER
+    return max(1, s), e
 
-def cumple_filtros(partida_dict, jugador, color, año_min, año_max):
-    # Lógica de filtrado idéntica a la tuya
-    blancas = partida_dict.get('White', '')
-    negras = partida_dict.get('Black', '')
+def process_downloads(start, end, limit):
+    real_end = min(end, limit)
+    all_pgn_content = []
     
-    if color == "Blancas" and jugador != blancas: return False
-    if color == "Negras" and jugador != negras: return False
-    if not color and jugador != blancas and jugador != negras: return False
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
-    fecha = partida_dict.get('Date', '')
-    match = re.match(r'(\d{4})', fecha)
-    if match:
-        año = int(match.group(1))
-        if año_min and año < año_min: return False
-        if año_max and año > año_max: return False
-    elif año_min or año_max:
-        return False
-        
-    return True
-
-# --- INTERFAZ DE USUARIO CON STREAMLIT ---
-st.set_page_config(page_title="Filtrador PGN Canaria", page_icon="♟️")
-
-st.title("♟️ Filtrador de Partidas de Ajedrez")
-st.markdown("### Base Canaria de Partidas")
-
-# Sidebar para filtros
-st.sidebar.header("Opciones de Filtrado")
-termino = st.sidebar.text_input("1. Buscar Jugador:", placeholder="Ej: Perez")
-
-if termino:
-    # Usamos cache para no buscar en Drive cada vez que cambiamos un filtro
-    @st.cache_data(ttl=600)
-    def cached_search(t):
-        return buscar_jugadores_web(t)
+    total = real_end - start + 1
+    for i, num in enumerate(range(start, real_end + 1)):
+        url = f"https://theweekinchess.com/zips/twic{num}g.zip"
+        status_text.text(f"Descargando edición {num}...")
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            if r.status_code == 200:
+                with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+                    pgn_name = next((f for f in z.namelist() if f.lower().endswith('.pgn')), None)
+                    if pgn_name:
+                        content = z.read(pgn_name).decode('utf-8', errors='ignore')
+                        all_pgn_content.append(content)
+            progress_bar.progress((i + 1) / total)
+        except: continue
     
-    resultados = cached_search(termino)
-    
-    if resultados:
-        jugador_sel = st.selectbox("2. Selecciona el jugador exacto:", list(resultados.keys())[:50])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            color_sel = st.selectbox("Color:", ["Todas", "Blancas", "Negras"])
-        with col2:
-            años = st.slider("Rango de años:", 1970, 2026, (1990, 2026))
-            
-        if st.button("🔍 Extraer Partidas"):
-            with st.spinner('Procesando base de datos...'):
-                response = get_pgn_stream()
-                partidas_texto = []
-                partida_actual = []
-                metadatos = {}
-                
-                for line in response.iter_lines():
-                    linea = line.decode('utf-8', errors='ignore').rstrip()
-                    
-                    if linea.startswith('[Event '):
-                        if partida_actual and cumple_filtros(metadatos, jugador_sel, 
-                                                           None if color_sel=="Todas" else color_sel, 
-                                                           años[0], años[1]):
-                            partidas_texto.append("\n".join(partida_actual))
-                        
-                        partida_actual = [linea]
-                        metadatos = {}
-                    else:
-                        if linea: partida_actual.append(linea)
-                        match = re.match(r'\[(\w+)\s+"([^"]*)"\]', linea)
-                        if match:
-                            metadatos[match.group(1)] = match.group(2)
+    if all_pgn_content:
+        return "\n\n".join(all_pgn_content), f"{start}_{real_end}.pgn"
+    return None, None
 
-                # Última partida
-                if partida_actual and cumple_filtros(metadatos, jugador_sel, 
-                                                   None if color_sel=="Todas" else color_sel, 
-                                                   años[0], años[1]):
-                    partidas_texto.append("\n".join(partida_actual))
+# --- INTERFAZ STREAMLIT ---
+st.title("♟️ TWIC Downloader")
 
-                if partidas_texto:
-                    pgn_final = "\n\n".join(partidas_texto)
-                    st.success(f"¡Se han encontrado {len(partidas_texto)} partidas!")
-                    
-                    # Botón de descarga
-                    st.download_button(
-                        label="💾 Descargar archivo PGN",
-                        data=pgn_final,
-                        file_name=f"{jugador_sel.replace(' ', '_')}.pgn",
-                        mime="text/plain",
-                    )
-                else:
-                    st.warning("No se encontraron partidas con esos filtros.")
-    else:
-        st.error("No se encontraron jugadores.")
+latest = get_latest_real_twic()
+st.info(f"Última edición disponible: {latest}")
 
-st.divider()
-st.caption("Los datos se extraen en tiempo real de Google Drive.")
+opcion = st.selectbox("¿Qué deseas descargar?", ["Año completo", "Mes específico", "Última edición"])
+
+archivo_final = None
+nombre_archivo = ""
+
+if opcion == "Año completo":
+    year = st.number_input("Año", min_value=1994, max_value=datetime.now().year, value=2023)
+    if st.button("Preparar descarga"):
+        s, e = get_twic_range(year)
+        archivo_final, nombre_archivo = process_downloads(s, e, latest)
+
+elif opcion == "Mes específico":
+    col1, col2 = st.columns(2)
+    year = col1.number_input("Año", min_value=1994, max_value=datetime.now().year, value=2023)
+    month = col2.number_input("Mes (1-12)", min_value=1, max_value=12, value=1)
+    if st.button("Preparar descarga"):
+        s, e = get_twic_range(year, month)
+        archivo_final, nombre_archivo = process_downloads(s, e, latest)
+
+elif opcion == "Última edición":
+    if st.button("Preparar descarga"):
+        archivo_final, nombre_archivo = process_downloads(latest, latest, latest)
+
+if archivo_final:
+    st.success("✅ ¡Archivo consolidado listo!")
+    st.download_button(
+        label="⬇️ Descargar PGN",
+        data=archivo_final,
+        file_name=nombre_archivo,
+        mime="text/plain"
+    )
