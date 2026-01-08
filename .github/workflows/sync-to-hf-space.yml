@@ -18,4 +18,4 @@ jobs:
       - name: Push to Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push https://pablo2116:$HF_TOKEN@huggingface.co/spaces/pablo2116/LastTwic main
+        run: git push https://pablo2116:$HF_TOKEN@huggingface.co/spaces/pablo2110/LastTwic main
