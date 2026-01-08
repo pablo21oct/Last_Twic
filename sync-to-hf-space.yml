@@ -1,0 +1,21 @@
+name: Sync to Hugging Face hub
+
+on:
+  push:
+    branches: [main]
+  # Para ejecutar manualmente desde la pestaña Actions
+  workflow_dispatch:
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          lfs: true
+      
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: git push https://pablo2116:$HF_TOKEN@huggingface.co/spaces/pablo2116/LastTwic main
